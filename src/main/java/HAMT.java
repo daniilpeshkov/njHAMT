@@ -1,7 +1,6 @@
 import java.lang.reflect.Array;
 import java.util.Collection;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 
 public class HAMT<K, V> implements Map<K, V> {
@@ -15,6 +14,15 @@ public class HAMT<K, V> implements Map<K, V> {
     private Node root = new Node();
 
     private class Node implements Cloneable {
+
+        @Override
+        public String toString() {
+            return "Node{" +
+                    "k=" + k +
+                    ", v=" + v +
+                    '}';
+        }
+
         NodeType nodeType;
         K k;
         int hash;
@@ -37,6 +45,13 @@ public class HAMT<K, V> implements Map<K, V> {
            nodeType = NodeType.KV_NODE;
         }
 
+        Node(int hash, K key, V value) {
+            k = key;
+            v = value;
+            this.hash = hash;
+            nodeType = NodeType.KV_NODE;
+        }
+
         Node(K key, V value, int height, int hash) {
             k = key;
             v = value;
@@ -47,6 +62,7 @@ public class HAMT<K, V> implements Map<K, V> {
 
         Node() {
             initTable();
+            height = 0;
             nodeType = NodeType.TABLE_NODE;
         }
 
@@ -72,6 +88,7 @@ public class HAMT<K, V> implements Map<K, V> {
         void makeNodeTable() {
             k = null;
             v = null;
+            nodeType = NodeType.TABLE_NODE;
             initTable();
         }
     }
@@ -80,47 +97,58 @@ public class HAMT<K, V> implements Map<K, V> {
         return n & ((1 << nBits) - 1);
     }
 
+    private Node getNodeOrClosest(K key, int hash) {
+        Node curNode = root;
+        Node prevNode = null;
+
+        int tmpHash = hash;
+
+        while (curNode.nodeType == NodeType.TABLE_NODE && curNode.table[lowNBits(tmpHash, NODE_TABLE_SIZE)] != null) {
+            prevNode = curNode;
+            curNode = curNode.table[lowNBits(tmpHash, NODE_TABLE_SIZE)];
+            tmpHash >>= NODE_TABLE_SIZE;
+        }
+
+        if(prevNode == null) return root;
+
+        if (curNode.nodeType == NodeType.TABLE_NODE) return curNode;
+        else {
+            if ( hash == curNode.hash && curNode.k.equals(key)) return curNode;
+            else return prevNode;
+        }
+    }
+
     @SuppressWarnings("unchecked")
     @Override
     public V put(K key, V value) {
-        if (key == null || value == null) throw new NullPointerException();
+        if ( key == null || value == null ) throw new NullPointerException();
 
-        Node curNode = root;
-        V prevValue = null;
+        int hash = key.hashCode();
+        Node curNode = getNodeOrClosest(key, hash);
 
-        int keyHash = key.hashCode();
-        int tmpHash = keyHash;
-        int height = 0;
-
-        while (curNode.nodeType != NodeType.KV_NODE && curNode.table[lowNBits(tmpHash, NODE_TABLE_SIZE)] != null) {
-            curNode = curNode.table[lowNBits(tmpHash, NODE_TABLE_SIZE)];
-            tmpHash >>= NODE_TABLE_SIZE;
-            height++;
-        }
-
-        if (curNode.nodeType == NodeType.TABLE_NODE && curNode.table[lowNBits(tmpHash, NODE_TABLE_SIZE)] == null) {
-            curNode.table[lowNBits(tmpHash, NODE_TABLE_SIZE)] = new Node(key, value, height);
-        } else if (curNode.nodeType == NodeType.KV_NODE) {
-            if (key.equals(curNode.k)) {
-                prevValue = curNode.v;
-                curNode.v = value;
+        if ( curNode.nodeType == NodeType.TABLE_NODE ) {
+            if ( curNode.table[lowNBits(hash >> (curNode.height * NODE_TABLE_SIZE), NODE_TABLE_SIZE)] == null ) {
+                curNode.table[lowNBits(hash >> (curNode.height * NODE_TABLE_SIZE), NODE_TABLE_SIZE)] = new Node(key, value, curNode.height + 1, hash);
             } else {
                 try {
-                    Node tmpNode = (Node) curNode.clone();
-                    tmpNode.height++;
-                    curNode.makeNodeTable();
-                    curNode.addNode(tmpNode);
-                    curNode.addNode(new Node(key, value));
-                    size++;
+                    Node nextNode = curNode.table[lowNBits(hash >> (curNode.height * NODE_TABLE_SIZE), NODE_TABLE_SIZE)];
+                    Node tmpNode = (Node) nextNode.clone();
+                    nextNode.makeNodeTable();
+                    nextNode.addNode(tmpNode);
+                    nextNode.addNode(new Node(hash, key, value));
                 } catch (CloneNotSupportedException e) {
                     e.printStackTrace();
                 }
             }
+            size++;
+            return null;
+        } else if ( curNode.nodeType == NodeType.KV_NODE ) {
+            V prevValue = curNode.v;
+            curNode.v = value;
+            return prevValue;
         }
-        return prevValue;
+        return null;
     }
-
-//    private getNode()
 
     @Override
     public int size() {
@@ -134,7 +162,7 @@ public class HAMT<K, V> implements Map<K, V> {
 
     @Override
     public boolean containsKey(Object key) {
-        return false;
+        return get(key) != null;
     }
 
     @Override
@@ -144,7 +172,11 @@ public class HAMT<K, V> implements Map<K, V> {
 
     @Override
     public V get(Object key) {
-        return null;
+        if ( key == null ) throw new NullPointerException();
+        int hash = key.hashCode();
+        Node node = getNodeOrClosest((K)key, hash);
+
+        return node.nodeType == NodeType.KV_NODE ? node.v : null;
     }
 
     @Override
@@ -159,7 +191,8 @@ public class HAMT<K, V> implements Map<K, V> {
 
     @Override
     public void clear() {
-
+        size = 0;
+        root = new Node();
     }
 
     @Override
