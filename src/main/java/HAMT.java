@@ -1,3 +1,4 @@
+import javax.swing.text.html.parser.Entity;
 import java.lang.reflect.Array;
 import java.util.*;
 
@@ -451,6 +452,16 @@ public class HAMT<K, V> implements Map<K, V> {
     @Override
     public Collection<V> values() {
         return new Collection<V>() {
+
+            private K getKeyByValue(V value) {
+                for ( Entry<K, V> e : entrySet() ) {
+                    if (value.equals(e.getValue())) {
+                        return e.getKey();
+                    }
+                }
+                return null;
+            }
+
             @Override
             public int size() {
                 return size;
@@ -463,17 +474,48 @@ public class HAMT<K, V> implements Map<K, V> {
 
             @Override
             public boolean contains(Object o) {
-                return false;
+                return getKeyByValue((V)o) != null;
             }
 
             @Override
             public Iterator<V> iterator() {
-                return null;
+                return new Iterator<V>() {
+                    private Iterator<Entry<K, V>> it = entrySet().iterator();
+                    private K lastReturned;
+
+
+                    @Override
+                    public boolean hasNext() {
+                        return it.hasNext();
+                    }
+
+                    @Override
+                    public V next() {
+                        Entry<K, V> e = it.next();
+                        lastReturned = it.next().getKey();
+                        return e.getValue();
+                    }
+
+                    @Override
+                    public void remove() {
+                        if ( lastReturned == null ) throw  new IllegalStateException();
+                        else {
+                            HAMT.this.remove(lastReturned);
+                            lastReturned = null;
+                        }
+                    }
+                };
             }
 
             @Override
             public Object[] toArray() {
-                return new Object[0];
+                Object[] tmp = new Object[size];
+                int i =0;
+                for (V v : this) {
+                    tmp[i] = v;
+                    i++;
+                }
+                return tmp;
             }
 
             @Override
@@ -483,37 +525,66 @@ public class HAMT<K, V> implements Map<K, V> {
 
             @Override
             public boolean add(V v) {
-                return false;
+                throw new UnsupportedOperationException();
             }
 
             @Override
             public boolean remove(Object o) {
+                K k = getKeyByValue((V) o);
+                if (k != null) {
+                    HAMT.this.remove(k);
+                    return true;
+                }
                 return false;
             }
 
             @Override
             public boolean containsAll(Collection<?> c) {
-                return false;
+                if ( c == null ) throw new NullPointerException();
+                Iterator<V> it = (Iterator<V>) c.iterator();
+                while (it.hasNext()) {
+                    if (! HAMT.this.containsKey(getKeyByValue(it.next())) ) {
+                        return false;
+                    }
+                }
+                return true;
             }
 
             @Override
             public boolean addAll(Collection<? extends V> c) {
-                return false;
-            }
-
-            @Override
-            public boolean removeAll(Collection<?> c) {
-                return false;
+                throw new UnsupportedOperationException();
             }
 
             @Override
             public boolean retainAll(Collection<?> c) {
-                return false;
+                boolean changed = false;
+                Iterator<V> it = iterator();
+                while ( it.hasNext() ) {
+                    V tmp = it.next();
+                    if (!c.contains(tmp)) {
+                        it.remove();
+                        changed = true;
+                    }
+                }
+                return changed;
+            }
+
+            @Override
+            public boolean removeAll(Collection<?> c) {
+                if (c == null) throw new NullPointerException();
+                Iterator<V> it = (Iterator<V>)c.iterator();
+                boolean changed = false;
+                while ( it.hasNext() ) {
+                    if (remove(it.next())) {
+                        changed = true;
+                    }
+                }
+                return changed;
             }
 
             @Override
             public void clear() {
-
+                HAMT.this.clear();
             }
         };
     }
